@@ -1,0 +1,16 @@
+parallel_openmp/
+minimum_spanning_tree/
+
+dijkstra/cmake-build-debug/
+dijkstra/.idea/
+dijkstra/CMakeLists.txt
+dijkstra/dijkstra_normal
+dijkstra/dijkstra_parallel
+dijkstra/matrix16384
+
+prim/cmake-build-debug/
+prim/.idea/
+prim/CMakeLists.txt
+prim/prim_normal
+prim/prim_parallel
+
