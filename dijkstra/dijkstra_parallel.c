@@ -1,9 +1,4 @@
-/* Author:   Courtni Wong
- * Purpose:  Implement Dijkstra's algorithm for solving the single-source 
- *           shortest path problem: find the length of the shortest path
- *           between a specified vertex and all other vertices in a directed 
- *           graph.
- *
+/* 
  * Input:    n, the number of vertices in the digraph
  *           mat, the adjacency matrix of the digraph
  * Output:   A list showing the cost of the shortest path
@@ -61,6 +56,7 @@ int main(int argc, char *argv[]) {
     MPI_Comm_size(comm, &p);
     MPI_Comm_rank(comm, &my_rank);
 
+    clock_t begin = clock(); // start running
     n = Read_n(my_rank, comm);
     loc_n = n / p;
     loc_mat = malloc(n * loc_n * sizeof(int));
@@ -72,10 +68,11 @@ int main(int argc, char *argv[]) {
     Read_matrix(loc_mat, n, loc_n, blk_col_mpi_t, my_rank, comm);
 
     //calculate running time
-    clock_t begin = clock(); // start running
+    clock_t startcomp = clock(); //end running
     Dijkstra(loc_mat, loc_dist, loc_pred, n, loc_n, my_rank, comm);
     clock_t end = clock(); //end running
     double time_spent = (double) (end - begin) / CLOCKS_PER_SEC;
+    double time_comp = (double) (end - startcomp) / CLOCKS_PER_SEC;
 
 //    Print_dists(loc_dist, n, loc_n, my_rank, comm);
 //    Print_paths(loc_pred, n, loc_n, my_rank, comm);
@@ -89,7 +86,10 @@ int main(int argc, char *argv[]) {
     MPI_Type_free(&blk_col_mpi_t);
 
     MPI_Finalize();
-    printf("Running time: %f\n", time_spent);
+	if (my_rank == 0) {
+		printf("Running time: %f, comm time: %f\n", time_spent, time_spent - time_comp);
+	}
+    
     return 0;
 }  /* main */
 
@@ -308,8 +308,9 @@ void Dijkstra(int mat[], int loc_dist[], int loc_pred[], int n, int loc_n,
  */
 void Initialize_matrix(int mat[], int loc_dist[], int loc_pred[], int known[],
                        int loc_n, int my_rank) {
-
-    for (int v = 0; v < loc_n; v++) {
+	
+	int v;
+    for (v = 0; v < loc_n; v++) {
         loc_dist[v] = mat[0 * loc_n + v];
         loc_pred[v] = 0;
         known[v] = 0;
