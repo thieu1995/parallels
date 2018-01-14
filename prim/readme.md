@@ -9,7 +9,7 @@ gcc -o prim_normal prim_normal.c
 ./prim_normal matrix8.txt
 
 Run song song:
-mpicc prim_mpi.c -o prim_mpi
-mpicc -g -Wall -o prim_mpi prim_mpi.c
+mpicc prim_parallel.c -o prim_parallel 
+mpicc -g -Wall -o prim_parallel prim_parallel.c
 
-mpirun -n 16 prim_mpi matrix8_mpi.txt 0
+mpirun -n 16 --oversubscribe prim_parallel matrix8_mpi.txt 0

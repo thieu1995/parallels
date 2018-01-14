@@ -14,7 +14,6 @@
 
 
 
-
 int number_of_processors; /* Number of processors */
 int rank;                 /* MPI rank */
 int root = 0;             /* Rank of root process (which holds the final result) */
@@ -40,7 +39,8 @@ typedef struct edge_t {   /* struct representing one edge */
 } edge_s;
 
 edge_s * mst_edges;       /* Array of MST edges */
-int edges_added_to_mst;   /* Number of edges currently added to MST */
+int edges_added_to_mst;  /* Number of edges currently added to MST */
+int oldreceivebuf[3];
 
 double comp_start_time;   /* Start time of computation */
 double comp_end_time;     /* End time of computation */
@@ -72,7 +72,10 @@ void start_communication_measure();
 void end_communication_measure();
 void start_parse_measure();
 void end_parse_measure();
+void printLinks();
 void print_measurement_times();
+void copyvalue(int *invec, int *inoutvec);
+int isequalsTo(int *invec, int *inoutvec);
 
 void init_MPI(int argc, char** argv) {
 
@@ -161,6 +164,7 @@ void init_data_structures() {
 	for (i = 0; i < vertices_per_process; i++) {
 		d[i] = INFINITY;
 		in_tree[i] = 0;
+		who[i] = -1;
 	}
 
 	if (rank == root) {
@@ -223,6 +227,17 @@ int get_local_vertex_index(int globalIndex) {
 	return localIndex;
 }
 
+void copyvalue(int *invec, int *inoutvec) {
+	inoutvec[0] = invec[0];
+	inoutvec[1] = invec[1];
+	inoutvec[2] = invec[2];
+}
+
+int isequalsTo(int *invec, int *inoutvec) {
+	if (inoutvec[0] == invec[0] && inoutvec[1] == invec[1] && inoutvec[2] == invec[2]) return 1;
+	return 0;
+}
+
 void update_distances(int addedVertex) {
 
 	/* Updates d[] to contain minimum distances after new vertex has been added to MST */
@@ -239,11 +254,13 @@ void update_distances(int addedVertex) {
 void reduce_global_min(int *invec, int *inoutvec, int *len, MPI_Datatype *type) {
 
 	/* Find global min from MPI_Reduce buffer */
-	if (invec[2] < inoutvec[2]) {
+	// printf("before: invec: (%d, %d, %d), inoutvec: (%d, %d, %d), oldrecvbuf: (%d, %d, %d)\n", invec[0], invec[1], invec[2], inoutvec[0], inoutvec[1], inoutvec[2], oldreceivebuf[0], oldreceivebuf[1], oldreceivebuf[2]);
+	if (invec[2] < inoutvec[2] || isequalsTo(inoutvec, oldreceivebuf) == 1) {
 		inoutvec[0] = invec[0];
 		inoutvec[1] = invec[1];
 		inoutvec[2] = invec[2];
 	}
+	// printf("after: inoutvec: (%d, %d, %d)\n", inoutvec[0], inoutvec[1], inoutvec[2]);
 }
 
 void find_mst() {
@@ -255,7 +272,6 @@ void find_mst() {
 		in_tree[localIndex] = 1;
 	}
 	update_distances(starting_vertex);
-
 	/* Buffers for MPI */
 	int sendbuf[3];
 	int recvbuf[3];
@@ -265,49 +281,51 @@ void find_mst() {
 	while (vertices_added < number_of_vertices) {
 
 		/* Find the vertex with the smallest distance to the tree */
-		int min = -1;
+		int min = 0;
 		int i;
 		for (i = 0; i < vertices_per_process; i++) {
 			if (in_tree[i] != 1) {
-				if ((min == -1) || (d[min] > d[i])) {
+				if ((min == 0) || (d[min] > d[i])) {
 					min = i;
 				}
 			}
 		}
-
+	
+		int u, v, globalMin;
 		sendbuf[0] = get_global_vertex_index(min); // v
+		update_distances(sendbuf[0]);
 		sendbuf[1] = who[min]; // u
 		sendbuf[2] = d[min]; //d[v]
+		// printf("send vertices_added: %d, rank: %d, min: %d, u: %d, v: %d, globalmin: %d\n\n",vertices_added,rank,min,sendbuf[1],sendbuf[0],sendbuf[2]);
 
 		/* Gather all results and find vertex with global minimum */
 		start_communication_measure();
 		MPI_Reduce(sendbuf, recvbuf, 3, MPI_INT, reduce_op, 0, MPI_COMM_WORLD);
 		end_communication_measure();
+		// printf("finish reduce\n\n");
 
-		int u, v, globalMin;
+		copyvalue(recvbuf, oldreceivebuf);
 		if (rank == root) {
-			u = recvbuf[0];
-			v = recvbuf[1];
+			v = recvbuf[0];
+			u = recvbuf[1];
 			globalMin = recvbuf[2];
-
-			edge_s e = { v, u, globalMin };
+			// printf("receive: u: %d, v: %d, globalmin: %d\n",u,v,globalMin);
+			edge_s e = { u, v, globalMin };
 			mst_edges[edges_added_to_mst++] = e;
 			total_distance += globalMin;
 		}
 
 		/* Broadcast vertex with global minimum */
 		start_communication_measure();
-		MPI_Bcast(&globalMin, 1, MPI_INT, root, MPI_COMM_WORLD);
+		MPI_Bcast(&v, 1, MPI_INT, root, MPI_COMM_WORLD);
 		end_communication_measure();
-
 		/* Mark vertex as in tree for appropriate process */
-		if (get_local_vertex_index(globalMin) != -1) {
-			in_tree[get_local_vertex_index(globalMin)] = 1;
+		if (get_local_vertex_index(v) != -1) {
+			in_tree[get_local_vertex_index(v)] = 1;
 		}
-
-		update_distances(globalMin);
-
+		update_distances(v);
 		vertices_added++;
+		// printMSTEdges();
 	}
 }
 
@@ -370,6 +388,14 @@ void printDistances() {
 	}
 }
 
+void printLinks() {
+	/* Helper function to print contents of who[] (used for debug) */
+	int i;
+	for (i = 0; i < vertices_per_process; i++) {
+		printf("Proc %d: who[%d]= %d\n", rank, i, who[i]);
+	}
+}
+
 void start_computation_measure() {
 	comp_start_time = MPI_Wtime();
 }
@@ -420,6 +446,7 @@ int main(int argc, char** argv) {
 	start_parse_measure();
 	parse_input();
 	end_parse_measure();
+	// printWeight();
 
 	start_computation_measure();
 	find_mst();
@@ -427,11 +454,6 @@ int main(int argc, char** argv) {
 
 	print_measurement_times();
 
-	printMSTEdges();
-    printTotalDistance();
-
 	free_resources();
-
 	return 0;
 }
-
